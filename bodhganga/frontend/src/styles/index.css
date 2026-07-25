@@ -1,0 +1,334 @@
+@import './design-tokens.css';
+@import './gov-clone.css'; /* Include for backward-compat but we will override heavily below */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+    background-color: #fdfcf9; /* Ivory base */
+    color: #1c2821; /* Rich deep charcoal green */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-serif);
+    color: #0F5132;
+    font-weight: 700;
+  }
+
+  h1 { font-size: 2.5rem; letter-spacing: -0.02em; }
+  h2 { font-size: 2rem; letter-spacing: -0.015em; }
+  h3 { font-size: 1.5rem; }
+
+  a {
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  html {
+    scroll-behavior: smooth;
+    overflow-x: hidden; /* never let horizontal scroll clip fixed overlays */
+  }
+
+  /* Custom Premium Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #fdfcf9;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(15, 81, 50, 0.15);
+    border-radius: 4px;
+    border: 2px solid #fdfcf9;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(15, 81, 50, 0.3);
+  }
+}
+
+@layer components {
+  /* ── Override Gov Clone classes to instantly modernize them ── */
+  .container, .container-custom {
+    max-width: 1240px !important;
+    margin: 0 auto !important;
+    padding: 0 1.5rem !important;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .section {
+    padding: 5rem 0 !important;
+    background-color: #fdfcf9;
+  }
+
+  .heading {
+    font-family: var(--font-serif);
+    font-size: 2.25rem;
+    font-weight: 700;
+    color: #0F5132;
+    border-bottom: 2px solid rgba(201, 169, 97, 0.2);
+    padding-bottom: 0.75rem;
+    margin-bottom: 2.5rem !important;
+  }
+
+  /* Modernized Card Grid */
+  .card-grid {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)) !important;
+    gap: 1.75rem !important;
+    border-top: none !important;
+    padding: 1.5rem 0 !important;
+  }
+
+  /* Modernized Card */
+  .card {
+    background: rgba(255, 255, 255, 0.9) !important;
+    border: 1px solid rgba(15, 81, 50, 0.08) !important;
+    border-radius: var(--radius-premium) !important;
+    box-shadow: var(--shadow-premium) !important;
+    padding: 1.25rem !important;
+    display: flex !important;
+    flex-direction: column !important;
+    text-decoration: none !important;
+    cursor: pointer !important;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    overflow: hidden !important;
+  }
+  
+  .card:hover {
+    background-color: #ffffff !important;
+    transform: translateY(-4px) !important;
+    border-color: rgba(201, 169, 97, 0.4) !important;
+    box-shadow: 0 20px 40px -15px rgba(6, 32, 20, 0.12), 0 0 15px rgba(201, 169, 97, 0.1) !important;
+  }
+
+  .card-image {
+    height: 160px !important;
+    border-radius: 0.75rem !important;
+    overflow: hidden !important;
+    margin-bottom: 1rem !important;
+    border: none !important;
+    position: relative !important;
+  }
+
+  .card-title {
+    font-family: var(--font-sans) !important;
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    color: #062014 !important;
+    margin: 0.5rem 0 !important;
+    line-height: 1.4 !important;
+  }
+
+  .card-meta {
+    font-family: var(--font-sans) !important;
+    font-size: 0.8rem !important;
+    color: #B89543 !important;
+    display: flex !important;
+    gap: 0.75rem !important;
+    font-weight: 600 !important;
+    margin-top: auto !important;
+  }
+
+  /* Modernized Top Bar and Branding Bar */
+  .top-bar {
+    background: #062014 !important;
+    color: rgba(255, 255, 255, 0.8) !important;
+    font-family: var(--font-sans);
+    height: 38px !important;
+    border-bottom: 1px solid rgba(201, 169, 97, 0.2) !important;
+  }
+  .top-bar .left, .top-bar .right a {
+    color: rgba(255, 255, 255, 0.85) !important;
+  }
+  .top-bar .right a:hover {
+    color: #C9A961 !important;
+  }
+
+  .branding-bar {
+    background: linear-gradient(135deg, #09311E 0%, #062014 100%) !important;
+    border-bottom: 1px solid rgba(201, 169, 97, 0.15) !important;
+    height: auto !important;
+    padding: 1.5rem 0 !important;
+  }
+
+  /* backdrop-filter on the element itself creates a stacking context that traps
+     position:fixed children (MSG91 popup). Use ::before so the blur effect is
+     preserved without forming a stacking context on .main-navbar itself. */
+  .main-navbar {
+    background: rgba(6, 32, 20, 0.85) !important;
+    border-bottom: 1px solid rgba(201, 169, 97, 0.15) !important;
+    position: relative !important;
+  }
+  .main-navbar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  .nav-inner .menu a {
+    font-family: var(--font-sans) !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.02em !important;
+    font-size: 0.85rem !important;
+    transition: all 0.3s ease !important;
+    line-height: 56px !important;
+    padding: 0 1.25rem !important;
+  }
+
+  .nav-inner .menu a:hover,
+  .nav-inner .menu a.active {
+    background-color: rgba(201, 169, 97, 0.15) !important;
+    color: #C9A961 !important;
+  }
+
+  .nav-auth-btn {
+    border-radius: 0.5rem !important;
+    font-family: var(--font-sans) !important;
+    font-size: 0.8rem !important;
+    font-weight: 700 !important;
+    background: linear-gradient(135deg, #C9A961 0%, #B89543 100%) !important;
+    color: #062014 !important;
+    transition: all 0.3s ease !important;
+  }
+  .nav-auth-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(201, 169, 97, 0.25);
+  }
+}
+
+@keyframes goldDotMove {
+  0% {
+    left: 0%;
+    transform: translateX(0);
+  }
+  100% {
+    left: 100%;
+    transform: translateX(-100%);
+  }
+}
+
+.animate-gold-dot-move {
+  animation: goldDotMove 7s ease-in-out infinite alternate;
+}
+
+/* Horizontal Marquee Ticker (Left to Right) */
+@keyframes marquee-l2r {
+  0% {
+    transform: translateX(-50%);
+  }
+  100% {
+    transform: translateX(0%);
+  }
+}
+
+.animate-marquee-l2r {
+  display: flex;
+  width: max-content;
+  animation: marquee-l2r 22s linear infinite;
+}
+
+.text-gold-glow-soft {
+  color: #E1CFA5;
+  text-shadow: 0 0 6px rgba(212, 175, 55, 0.6);
+}
+
+/* Gold Shimmer Hover Effect on USP Badge */
+.shimmer-badge {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.shimmer-badge::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    120deg,
+    transparent 0%,
+    rgba(212, 175, 55, 0.12) 30%,
+    rgba(212, 175, 55, 0.28) 50%,
+    rgba(212, 175, 55, 0.12) 70%,
+    transparent 100%
+  );
+  transform: translateX(-120%);
+  transition: none;
+  pointer-events: none;
+}
+
+.shimmer-badge:hover::before {
+  transform: translateX(120%);
+  transition: transform 1.8s ease-out;
+}
+
+/* Swiper Pagination & Navigation Custom Premium Styling */
+.homepage-swiper .swiper-pagination-bullet {
+  background: rgba(255, 255, 255, 0.4) !important;
+  opacity: 1 !important;
+  width: 8px !important;
+  height: 8px !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.homepage-swiper .swiper-pagination-bullet-active {
+  background: #D4AF37 !important; /* Gold active color */
+  width: 20px !important;
+  border-radius: 4px !important;
+}
+
+.homepage-swiper .swiper-button-next,
+.homepage-swiper .swiper-button-prev {
+  color: #D4AF37 !important;
+  background: rgba(6, 32, 20, 0.75) !important;
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 50% !important;
+  border: 1px solid rgba(212, 175, 55, 0.35) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.homepage-swiper:hover .swiper-button-next,
+.homepage-swiper:hover .swiper-button-prev {
+  opacity: 1;
+  visibility: visible;
+}
+
+.homepage-swiper .swiper-button-next:hover,
+.homepage-swiper .swiper-button-prev:hover {
+  background: rgba(6, 32, 20, 0.95) !important;
+  border-color: #D4AF37 !important;
+  transform: scale(1.08);
+  box-shadow: 0 0 12px rgba(212, 175, 55, 0.25) !important;
+}
+
+.homepage-swiper .swiper-button-next::after,
+.homepage-swiper .swiper-button-prev::after {
+  font-size: 16px !important;
+  font-weight: 900 !important;
+}
+
+.homepage-swiper .swiper-pagination {
+  bottom: 20px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  z-index: 20 !important;
+}
