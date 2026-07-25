@@ -1,12 +1,3 @@
-##############################################################################
-#  CloudPulse – AlertmanagerConfig
-#
-#  Routes CloudPulse alerts to a Discord or Slack webhook.
-#  Replace the placeholder webhook URLs before applying.
-#
-#  Apply with:
-#    kubectl apply -f k8s/AlertmanagerConfig.yaml -n bodhganga
-##############################################################################
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
@@ -17,81 +8,34 @@ metadata:
     app.kubernetes.io/name: bodhganga
     app.kubernetes.io/part-of: cloudpulse
 spec:
-
-  # ── Routing Tree ────────────────────────────────────────────────────────────
   route:
-    # Default group-by: collapse by alertname + namespace
     groupBy: ["alertname", "namespace", "severity"]
-    groupWait: 30s       # Wait 30s to buffer related alerts before firing
-    groupInterval: 5m    # Re-notify at most every 5 min for ongoing alerts
-    repeatInterval: 4h   # Re-send resolved notification after 4 hours
-
-    # Default receiver for all alerts
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
     receiver: discord-critical
-
-    # ── Child Routes ──────────────────────────────────────────────────────────
     routes:
-      # Critical alerts → dedicated critical channel
       - receiver: discord-critical
         matchers:
           - name: severity
             value: critical
-        groupWait: 10s   # Fire faster for critical severity
-
-      # Warning alerts → general platform channel
+        groupWait: 10s
       - receiver: discord-warning
         matchers:
           - name: severity
             value: warning
 
-      # Slack route (enable by uncommenting)
-      # - receiver: slack-platform
-      #   matchers:
-      #     - name: team
-      #       value: platform
-
-  # ── Receivers ───────────────────────────────────────────────────────────────
   receivers:
-
-    # ── Discord – Critical Alerts ──────────────────────────────────────────────
     - name: discord-critical
       webhookConfigs:
         - url: "https://discord.com/api/webhooks/REPLACE_WITH_YOUR_CRITICAL_WEBHOOK_URL"
           sendResolved: true
-          httpConfig:
-            tlsConfig:
-              insecureSkipVerify: false
-          # Discord expects JSON payload; Alertmanager sends it automatically.
-          # Customize the title via message template below.
 
-    # ── Discord – Warning Alerts ───────────────────────────────────────────────
     - name: discord-warning
       webhookConfigs:
         - url: "https://discord.com/api/webhooks/REPLACE_WITH_YOUR_WARNING_WEBHOOK_URL"
           sendResolved: true
 
-    # ── Slack (optional – uncomment and fill webhook URL) ────────────────────
-    # - name: slack-platform
-    #   slackConfigs:
-    #     - apiURL: "https://hooks.slack.com/services/REPLACE/WITH/YOUR/SLACK/URL"
-    #       channel: "#cloudpulse-alerts"
-    #       sendResolved: true
-    #       title: |-
-    #         [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}]
-    #         {{ .CommonLabels.alertname }}
-    #       text: >-
-    #         {{ range .Alerts }}
-    #         *Alert:* {{ .Annotations.summary }}
-    #         *Description:* {{ .Annotations.description }}
-    #         *Severity:* {{ .Labels.severity }}
-    #         *Service:* {{ .Labels.service }}
-    #         {{ end }}
-    #       iconEmoji: ":rotating_light:"
-    #       username: "CloudPulse Alertmanager"
-
-  # ── Inhibition Rules ─────────────────────────────────────────────────────────
-  # Suppress warning alerts when a critical alert is already firing for the
-  # same service — avoids notification storms.
   inhibitRules:
     - sourceMatch:
         - name: severity

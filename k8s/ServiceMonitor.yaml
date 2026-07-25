@@ -1,13 +1,3 @@
-##############################################################################
-#  CloudPulse – Prometheus ServiceMonitor for BodhGanga Backend
-#
-#  Tells the Prometheus Operator to scrape /actuator/prometheus
-#  from bodhganga-backend-svc on port 9090 every 30 seconds.
-#
-#  IMPORTANT: BodhGanga uses a single port (9090) for both app traffic
-#  and the Prometheus metrics endpoint — the ServiceMonitor targets
-#  the 'app' port which maps to :9090/actuator/prometheus.
-##############################################################################
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -21,18 +11,15 @@ spec:
   namespaceSelector:
     matchNames:
       - bodhganga
-
   selector:
     matchLabels:
       app.kubernetes.io/name: bodhganga-backend
-
   endpoints:
-    - port: app                         # Matches Service port name 'app' → :9090
+    - port: app
       path: /actuator/prometheus
       scheme: http
       interval: 30s
       scrapeTimeout: 10s
-
       relabelings:
         - sourceLabels: [__meta_kubernetes_pod_name]
           targetLabel: pod
@@ -42,9 +29,7 @@ spec:
           targetLabel: node
         - sourceLabels: [__meta_kubernetes_service_name]
           targetLabel: service
-
       metricRelabelings:
-        # Drop noisy high-cardinality buckets we don't need long-term
         - sourceLabels: [__name__]
           regex: "jvm_gc_pause_seconds_bucket|jvm_buffer_.*"
           action: drop

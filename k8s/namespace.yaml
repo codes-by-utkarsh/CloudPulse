@@ -1,7 +1,3 @@
-##############################################################################
-#  CloudPulse – Kubernetes Namespaces
-#  bodhganga : application workloads (backend + frontend + mongodb)
-##############################################################################
 apiVersion: v1
 kind: Namespace
 metadata:

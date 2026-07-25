@@ -1,13 +1,3 @@
-##############################################################################
-#  CloudPulse – BodhGanga Kubernetes Services
-#
-#  Port mapping summary (real app):
-#    Backend  → 9090 (Spring Boot app + /actuator/prometheus on same port)
-#    Frontend → 80   (Nginx serving React SPA)
-#    MongoDB  → 27017 (internal cluster only – no external exposure)
-##############################################################################
-
-# ── Backend Service ──────────────────────────────────────────────────────────
 apiVersion: v1
 kind: Service
 metadata:
@@ -19,21 +9,19 @@ metadata:
     app.kubernetes.io/component: backend
   annotations:
     prometheus.io/scrape: "true"
-    prometheus.io/port:   "9090"
-    prometheus.io/path:   "/actuator/prometheus"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/actuator/prometheus"
 spec:
   type: ClusterIP
   selector:
     app.kubernetes.io/name: bodhganga-backend
   ports:
-    # Single port: handles both REST API traffic AND /actuator/prometheus scraping
     - name: app
       port: 9090
       targetPort: 9090
       protocol: TCP
 
 ---
-# ── Frontend Service ─────────────────────────────────────────────────────────
 apiVersion: v1
 kind: Service
 metadata:
@@ -44,7 +32,6 @@ metadata:
     app.kubernetes.io/part-of: cloudpulse
     app.kubernetes.io/component: frontend
 spec:
-  # NodePort so you can access the frontend via minikube service or port-forward
   type: NodePort
   selector:
     app.kubernetes.io/name: bodhganga-frontend
@@ -52,13 +39,10 @@ spec:
     - name: http
       port: 80
       targetPort: 80
-      nodePort: 30080   # Access via http://<minikube-ip>:30080
+      nodePort: 30080
       protocol: TCP
 
 ---
-# ── MongoDB Headless Service (for StatefulSet DNS) ───────────────────────────
-# Headless service gives each MongoDB pod a stable DNS name:
-#   bodhganga-mongodb-0.bodhganga-mongodb.bodhganga.svc.cluster.local
 apiVersion: v1
 kind: Service
 metadata:
@@ -69,7 +53,7 @@ metadata:
     app.kubernetes.io/part-of: cloudpulse
     app.kubernetes.io/component: database
 spec:
-  clusterIP: None   # Headless
+  clusterIP: None
   selector:
     app.kubernetes.io/name: bodhganga-mongodb
   ports:
@@ -78,11 +62,6 @@ spec:
       targetPort: 27017
 
 ---
-##############################################################################
-#  PodDisruptionBudget – Backend
-#  Guarantees at least 2 backend pods are always running during node drains
-#  or cluster upgrades (rolling update safe).
-##############################################################################
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -98,9 +77,6 @@ spec:
       app.kubernetes.io/name: bodhganga-backend
 
 ---
-##############################################################################
-#  PodDisruptionBudget – Frontend
-##############################################################################
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
