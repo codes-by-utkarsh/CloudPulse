@@ -1,8 +1,11 @@
 ##############################################################################
-#  CloudPulse – PrometheusRule (Alerting Rules)
+#  CloudPulse – PrometheusRule for BodhGanga
 #
-#  Defines SRE-grade alert rules for the BodhGanga workload.
-#  The Prometheus Operator loads this resource automatically.
+#  Updated to match real app structure:
+#   - job name: "bodhganga-backend-svc"  (matches ServiceMonitor)
+#   - app port: 9090 (single port)
+#   - MongoDB health tracked via Spring Actuator composite health
+#   - JWT/Security failure rate alert added
 ##############################################################################
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -10,63 +13,58 @@ metadata:
   name: bodhganga-alerts
   namespace: bodhganga
   labels:
-    # Must match the Prometheus ruleSelector; kube-prometheus-stack default:
     release: cloudpulse-prometheus
-    app.kubernetes.io/name: bodhganga
+    app.kubernetes.io/name: bodhganga-backend
     app.kubernetes.io/part-of: cloudpulse
     role: alert-rules
 spec:
   groups:
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Group 1: BodhGanga Availability / Uptime
+    # Group 1: BodhGanga Backend Availability
     # ─────────────────────────────────────────────────────────────────────────
     - name: bodhganga.availability
       interval: 30s
       rules:
 
         # ── Alert 1: TargetDown ──────────────────────────────────────────────
-        # Fires if ANY BodhGanga pod disappears from Prometheus' target list
-        # for more than 1 minute.  Possible causes: OOMKill, crash loop,
-        # failed readiness probe, eviction.
+        # Fires if any backend pod disappears from Prometheus' target list.
+        # Common causes: OOMKill, crash loop, failed readiness probe, eviction.
         - alert: BodhGangaTargetDown
           expr: |
-            up{job="bodhganga-svc", namespace="bodhganga"} == 0
+            up{job="bodhganga-backend-svc", namespace="bodhganga"} == 0
           for: 1m
           labels:
             severity: critical
             team: platform
-            service: bodhganga
+            service: bodhganga-backend
           annotations:
-            summary: "🔴 BodhGanga pod is DOWN"
+            summary: "🔴 BodhGanga backend pod is DOWN"
             description: >-
-              BodhGanga pod {{ $labels.pod }} in namespace {{ $labels.namespace }}
-              has been unreachable for more than 1 minute.
-              Prometheus target: {{ $labels.instance }}.
-              Investigate with: kubectl describe pod {{ $labels.pod }} -n bodhganga
+              BodhGanga backend pod {{ $labels.pod }} in namespace {{ $labels.namespace }}
+              has been unreachable for > 1 minute.
+              Check: kubectl describe pod {{ $labels.pod }} -n bodhganga
             runbook_url: "https://github.com/your-org/cloudpulse/wiki/Runbook-TargetDown"
-            dashboard_url: "http://grafana.cloudpulse.internal/d/spring-boot"
 
-        # ── Alert 2: BodhGanga Service Degraded (< 3 pods Ready) ────────────
+        # ── Alert 2: Replica count degraded ─────────────────────────────────
         - alert: BodhGangaReplicasMissing
           expr: |
             kube_deployment_status_replicas_ready{
-              deployment="bodhganga",
+              deployment="bodhganga-backend",
               namespace="bodhganga"
             } < 3
           for: 2m
           labels:
             severity: warning
             team: platform
-            service: bodhganga
+            service: bodhganga-backend
           annotations:
-            summary: "⚠️ BodhGanga replica count degraded"
+            summary: "⚠️ BodhGanga backend replicas degraded"
             description: >-
-              Expected 3 ready replicas for deployment bodhganga but found
-              {{ $value }}.  The service may have reduced capacity.
-            runbook_url: "https://github.com/your-org/cloudpulse/wiki/Runbook-ReplicasMissing"
+              Expected 3 ready replicas but found {{ $value }}.
+              Service is running with reduced capacity.
 
-        # ── Alert 3: High HTTP Error Rate (5xx) ─────────────────────────────
+        # ── Alert 3: High HTTP 5xx Error Rate ───────────────────────────────
         - alert: BodhGangaHighErrorRate
           expr: |
             (
@@ -83,15 +81,14 @@ spec:
           labels:
             severity: critical
             team: platform
-            service: bodhganga
+            service: bodhganga-backend
           annotations:
             summary: "🔴 BodhGanga error rate > 5%"
             description: >-
-              HTTP 5xx error rate is {{ $value | humanizePercentage }} over the
-              last 5 minutes.  SLO breach imminent.
-            runbook_url: "https://github.com/your-org/cloudpulse/wiki/Runbook-HighErrorRate"
+              HTTP 5xx error rate is {{ $value | humanizePercentage }} over
+              the last 5 minutes. SLO breach imminent.
 
-        # ── Alert 4: High Latency (p99 > 2s) ────────────────────────────────
+        # ── Alert 4: High API Latency (p99 > 2s) ────────────────────────────
         - alert: BodhGangaHighLatency
           expr: |
             histogram_quantile(0.99,
@@ -103,12 +100,30 @@ spec:
           labels:
             severity: warning
             team: platform
-            service: bodhganga
+            service: bodhganga-backend
           annotations:
-            summary: "⚠️ BodhGanga p99 latency > 2s"
+            summary: "⚠️ BodhGanga p99 API latency > 2s"
             description: >-
               99th percentile latency for {{ $labels.uri }} is
               {{ $value | humanizeDuration }}.
+
+        # ── Alert 5: Auth Failures Spike (Security / JWT issues) ────────────
+        - alert: BodhGangaAuthFailureSpike
+          expr: |
+            sum(rate(http_server_requests_seconds_count{
+              namespace="bodhganga",
+              status="401"
+            }[5m])) > 10
+          for: 3m
+          labels:
+            severity: warning
+            team: platform
+            service: bodhganga-backend
+          annotations:
+            summary: "⚠️ BodhGanga 401 Unauthorized spike"
+            description: >-
+              More than 10 unauthorized requests/sec in the last 5 minutes.
+              Possible JWT misconfiguration or brute-force attempt.
 
     # ─────────────────────────────────────────────────────────────────────────
     # Group 2: Node / Infrastructure Health
@@ -117,8 +132,7 @@ spec:
       interval: 60s
       rules:
 
-        # ── Alert 5: HighCpuUsage ────────────────────────────────────────────
-        # Node-level CPU utilisation above 80% for 5 minutes.
+        # ── Alert 6: HighCpuUsage ────────────────────────────────────────────
         - alert: HighNodeCpuUsage
           expr: |
             (
@@ -133,11 +147,10 @@ spec:
           annotations:
             summary: "⚠️ Node CPU usage > 80%"
             description: >-
-              Node {{ $labels.instance }} CPU usage is {{ $value | humanize }}%.
-              Check for noisy-neighbour pods or consider scaling the node pool.
-            runbook_url: "https://github.com/your-org/cloudpulse/wiki/Runbook-HighCPU"
+              Node {{ $labels.instance }} CPU is {{ $value | humanize }}%.
+              Check for resource-hungry pods: kubectl top pods -n bodhganga
 
-        # ── Alert 6: High Memory Pressure ───────────────────────────────────
+        # ── Alert 7: High Memory Usage ───────────────────────────────────────
         - alert: HighNodeMemoryUsage
           expr: |
             (
@@ -153,9 +166,10 @@ spec:
           annotations:
             summary: "⚠️ Node memory usage > 85%"
             description: >-
-              Node {{ $labels.instance }} memory usage is {{ $value | humanize }}%.
+              Node {{ $labels.instance }} memory is {{ $value | humanize }}%.
 
-        # ── Alert 7: Disk Space Low ──────────────────────────────────────────
+        # ── Alert 8: Low Disk Space ──────────────────────────────────────────
+        # Important: MongoDB and S3-sync volumes can grow quickly.
         - alert: LowDiskSpace
           expr: |
             (
@@ -167,19 +181,20 @@ spec:
             severity: warning
             team: platform
           annotations:
-            summary: "⚠️ Disk space < 15% on {{ $labels.instance }}"
+            summary: "⚠️ Low disk space on {{ $labels.instance }}"
             description: >-
-              Mountpoint {{ $labels.mountpoint }} on {{ $labels.instance }}
-              has only {{ $value | humanize }}% free space remaining.
+              Mountpoint {{ $labels.mountpoint }} has only
+              {{ $value | humanize }}% free. MongoDB data volume at risk.
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Group 3: JVM Health (BodhGanga-specific)
+    # Group 3: JVM Health (BodhGanga Backend specific)
     # ─────────────────────────────────────────────────────────────────────────
     - name: bodhganga.jvm
       interval: 60s
       rules:
 
-        # ── Alert 8: JVM Heap Near Limit ────────────────────────────────────
+        # ── Alert 9: JVM Heap Near Limit ─────────────────────────────────────
+        # With S3/GDrive/Gemini operations, heap spikes are common.
         - alert: BodhGangaJvmHeapHigh
           expr: |
             (
@@ -196,9 +211,24 @@ spec:
           labels:
             severity: warning
             team: platform
-            service: bodhganga
+            service: bodhganga-backend
           annotations:
             summary: "⚠️ BodhGanga JVM heap > 85%"
             description: >-
-              Pod {{ $labels.pod }} heap usage is {{ $value | humanize }}%.
-              Risk of OOMKill if this trend continues.
+              Pod {{ $labels.pod }} heap is {{ $value | humanize }}%.
+              Risk of OOMKill — check for large S3 or Drive payload processing.
+
+        # ── Alert 10: MongoDB Connection Pool Exhausted ──────────────────────
+        - alert: BodhGangaMongoPoolExhausted
+          expr: |
+            mongodb_driver_pool_waitqueuesize{namespace="bodhganga"} > 5
+          for: 3m
+          labels:
+            severity: warning
+            team: platform
+            service: bodhganga-backend
+          annotations:
+            summary: "⚠️ MongoDB connection pool wait queue growing"
+            description: >-
+              {{ $value }} threads waiting for a MongoDB connection.
+              Consider increasing spring.data.mongodb.pool.max-size.

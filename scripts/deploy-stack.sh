@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 ##############################################################################
-#  CloudPulse – Full Observability Stack Deployment Script
-#  deploy-stack.sh
+#  CloudPulse – Full Stack Deployment Script
+#  deploy-stack.sh  (updated for real BodhGanga structure)
 #
-#  Run this script after setup-cluster.sh has completed and your cluster
-#  is healthy (kubectl get nodes shows Ready).
+#  BodhGanga real structure:
+#    bodhganga/backend/   → Spring Boot 3.4.5, Java 17, MongoDB, port 9090
+#    bodhganga/frontend/  → React (Vite) + Nginx, port 80
+#    MongoDB              → mongo:7.0 StatefulSet, port 27017
 #
-#  Usage:
-#    chmod +x scripts/deploy-stack.sh
-#    ./scripts/deploy-stack.sh
+#  Prerequisites:
+#    - Minikube running (minikube status)
+#    - kubectl configured
+#    - Helm 3 installed
 ##############################################################################
 
 set -euo pipefail
@@ -22,102 +25,125 @@ error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+BODHGANGA_DIR="$PROJECT_ROOT/bodhganga"
+
+# ── Verify the cluster is reachable ───────────────────────────────────────────
+info "Verifying Minikube cluster..."
+kubectl cluster-info --request-timeout=5s || error "Cluster not reachable. Run: minikube start"
 
 ##############################################################################
-# PHASE 1 – Build & Load BodhGanga Docker Image into Minikube
+# PHASE 1 – Point Docker at Minikube's daemon & build images
 ##############################################################################
-info "Phase 1 – Building BodhGanga Docker image..."
-
-cd "$PROJECT_ROOT/bodhganga-app"
-
-# Build the image using Docker (Minikube has its own Docker daemon)
+info "Phase 1 – Building Docker images inside Minikube..."
 eval "$(minikube docker-env)"
-docker build -t bodhganga-app:1.0.0 .
 
-success "Image bodhganga-app:1.0.0 loaded into Minikube."
+# Backend image
+info "  Building bodhganga-backend:1.0.0 ..."
+docker build -t bodhganga-backend:1.0.0 "$BODHGANGA_DIR/backend/"
+success "  Backend image built."
 
-cd "$PROJECT_ROOT"
-
-##############################################################################
-# PHASE 2 – Create Namespace
-##############################################################################
-info "Phase 2 – Creating Kubernetes namespace..."
-kubectl apply -f k8s/namespace.yaml
-success "Namespace 'bodhganga' ready."
-
-##############################################################################
-# PHASE 3 – Deploy BodhGanga Application
-##############################################################################
-info "Phase 3 – Deploying BodhGanga application..."
-kubectl apply -f k8s/Deployment.yaml
-kubectl apply -f k8s/Service.yaml
-success "BodhGanga Deployment and Service applied."
-
-info "Waiting for BodhGanga pods to be ready (timeout: 3 min)..."
-kubectl rollout status deployment/bodhganga \
-  --namespace bodhganga \
-  --timeout=180s
-success "BodhGanga rollout complete."
+# Frontend image (pass the backend API URL as a build arg)
+info "  Building bodhganga-frontend:1.0.0 ..."
+docker build \
+  --build-arg VITE_API_BASE_URL="http://$(minikube ip):30090/api" \
+  -t bodhganga-frontend:1.0.0 \
+  "$BODHGANGA_DIR/frontend/"
+success "  Frontend image built."
 
 ##############################################################################
-# PHASE 4 – Add Helm Repositories
+# PHASE 2 – Namespace & Secrets
+##############################################################################
+info "Phase 2 – Creating namespace and secrets..."
+kubectl apply -f "$PROJECT_ROOT/k8s/namespace.yaml"
+
+# Apply the Secret template (users must populate real values first)
+if kubectl get secret bodhganga-secrets -n bodhganga &>/dev/null; then
+  warn "Secret 'bodhganga-secrets' already exists. Skipping creation."
+  warn "To update: kubectl delete secret bodhganga-secrets -n bodhganga && kubectl apply -f k8s/Secret.yaml"
+else
+  kubectl apply -f "$PROJECT_ROOT/k8s/Secret.yaml"
+  success "Secret 'bodhganga-secrets' created."
+fi
+
+##############################################################################
+# PHASE 3 – Deploy BodhGanga (Backend + Frontend + MongoDB)
+##############################################################################
+info "Phase 3 – Deploying BodhGanga application stack..."
+kubectl apply -f "$PROJECT_ROOT/k8s/Deployment.yaml"
+kubectl apply -f "$PROJECT_ROOT/k8s/Service.yaml"
+success "Deployment and Service manifests applied."
+
+info "Waiting for MongoDB to be ready..."
+kubectl rollout status statefulset/bodhganga-mongodb \
+  --namespace bodhganga --timeout=120s
+
+info "Waiting for Backend pods to be ready (timeout: 4 min)..."
+kubectl rollout status deployment/bodhganga-backend \
+  --namespace bodhganga --timeout=240s
+
+info "Waiting for Frontend pods to be ready..."
+kubectl rollout status deployment/bodhganga-frontend \
+  --namespace bodhganga --timeout=120s
+
+success "All BodhGanga workloads are running."
+
+echo ""
+kubectl get pods -n bodhganga
+echo ""
+
+##############################################################################
+# PHASE 4 – Helm: Add repos & install kube-prometheus-stack
 ##############################################################################
 info "Phase 4 – Adding Helm repositories..."
-
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo add grafana https://grafana.github.io/helm-charts
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+helm repo add grafana https://grafana.github.io/helm-charts || true
 helm repo update
+success "Helm repos updated."
 
-success "Helm repositories updated."
-
-##############################################################################
-# PHASE 5 – Install kube-prometheus-stack
-##############################################################################
-info "Phase 5 – Installing kube-prometheus-stack (Prometheus + Grafana + Alertmanager)..."
-
+info "Installing kube-prometheus-stack (Prometheus + Grafana + Alertmanager)..."
 kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
 
 helm upgrade --install cloudpulse-prometheus \
   prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
-  --create-namespace \
-  --values helm/prometheus-values.yaml \
+  --values "$PROJECT_ROOT/helm/prometheus-values.yaml" \
   --wait \
   --timeout 10m
 
 success "kube-prometheus-stack installed."
 
 ##############################################################################
-# PHASE 6 – Apply ServiceMonitor and Alert Rules
+# PHASE 5 – Apply Monitoring CRDs
 ##############################################################################
-info "Phase 6 – Applying ServiceMonitor and PrometheusRules..."
-kubectl apply -f k8s/ServiceMonitor.yaml
-kubectl apply -f k8s/PrometheusRule.yaml
-kubectl apply -f k8s/AlertmanagerConfig.yaml
+info "Phase 5 – Applying ServiceMonitor, PrometheusRules, AlertmanagerConfig..."
+kubectl apply -f "$PROJECT_ROOT/k8s/ServiceMonitor.yaml"
+kubectl apply -f "$PROJECT_ROOT/k8s/PrometheusRule.yaml"
+kubectl apply -f "$PROJECT_ROOT/k8s/AlertmanagerConfig.yaml"
 success "Monitoring resources applied."
 
 ##############################################################################
 # SUMMARY
 ##############################################################################
+MINIKUBE_IP=$(minikube ip)
+
 echo ""
-echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║        CloudPulse Stack Deployment COMPLETE 🚀               ║${NC}"
-echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║      CloudPulse + BodhGanga Deployment COMPLETE 🚀              ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  BodhGanga pods:"
-kubectl get pods -n bodhganga
+echo -e "${YELLOW}BodhGanga Access:${NC}"
+echo "  Frontend   → http://$MINIKUBE_IP:30080"
+echo "  Backend API→ kubectl port-forward svc/bodhganga-backend-svc 9090:9090 -n bodhganga"
+echo "  Metrics    → http://localhost:9090/actuator/prometheus  (after port-forward)"
 echo ""
-echo -e "  Monitoring pods:"
-kubectl get pods -n monitoring
+echo -e "${YELLOW}Observability Stack:${NC}"
+echo "  Grafana    → kubectl port-forward svc/cloudpulse-prometheus-grafana 3000:80 -n monitoring"
+echo "               http://localhost:3000  |  admin / CloudPulse@2024!"
+echo "  Prometheus → kubectl port-forward svc/cloudpulse-prometheus-kube-prome-prometheus 9091:9090 -n monitoring"
+echo "  Alertmgr   → kubectl port-forward svc/cloudpulse-prometheus-kube-prome-alertmanager 9093:9093 -n monitoring"
 echo ""
-echo -e "${YELLOW}Access Grafana:${NC}"
-echo "  kubectl port-forward svc/cloudpulse-prometheus-grafana 3000:80 -n monitoring"
-echo "  Open: http://localhost:3000  |  admin / CloudPulse@2024!"
+echo -e "${YELLOW}Import Grafana Dashboard:${NC}"
+echo "  JVM (Micrometer)     → ID: 4701  (recommended for BodhGanga)"
+echo "  Spring Boot Stats    → ID: 12900"
+echo "  Kubernetes Overview  → ID: 7249"
 echo ""
-echo -e "${YELLOW}Access Prometheus:${NC}"
-echo "  kubectl port-forward svc/cloudpulse-prometheus-kube-prome-prometheus 9091:9090 -n monitoring"
-echo "  Open: http://localhost:9091"
-echo ""
-echo -e "${YELLOW}Access Alertmanager:${NC}"
-echo "  kubectl port-forward svc/cloudpulse-prometheus-kube-prome-alertmanager 9093:9093 -n monitoring"
-echo "  Open: http://localhost:9093"
