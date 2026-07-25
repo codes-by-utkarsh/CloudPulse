@@ -1,0 +1,178 @@
+##############################################################################
+#  CloudPulse – BodhGanga Kubernetes Deployment
+#  Phase 3: 3 replicas, resource limits, liveness & readiness probes
+##############################################################################
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bodhganga
+  namespace: bodhganga
+  labels:
+    app.kubernetes.io/name: bodhganga
+    app.kubernetes.io/part-of: cloudpulse
+    app.kubernetes.io/component: backend
+    version: "1.0.0"
+  annotations:
+    # Enables Prometheus discovery via annotation-based scraping (fallback)
+    prometheus.io/scrape: "true"
+    prometheus.io/port:   "9090"
+    prometheus.io/path:   "/actuator/prometheus"
+spec:
+  # ── High Availability: 3 replicas across nodes ────────────────────────────
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bodhganga
+
+  # ── Rolling Update Strategy ───────────────────────────────────────────────
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # At most 1 pod unavailable during a rollout (zero-downtime)
+      maxUnavailable: 1
+      # Surge 1 extra pod to avoid capacity drop during update
+      maxSurge: 1
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bodhganga
+        app.kubernetes.io/part-of: cloudpulse
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "9090"
+        prometheus.io/path:   "/actuator/prometheus"
+
+    spec:
+      # ── Topology Spread: distribute pods across nodes ──────────────────────
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: bodhganga
+
+      # ── Security Context (pod level) ───────────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      # ── Graceful shutdown: allow 30 s for in-flight requests ───────────────
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: bodhganga
+          # Replace with your actual image registry path
+          image: bodhganga-app:1.0.0
+          imagePullPolicy: IfNotPresent
+
+          # ── Container Security Context ─────────────────────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: management
+              containerPort: 9090
+              protocol: TCP
+
+          # ── Environment Variables ──────────────────────────────────────────
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "production"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: SERVER_PORT
+              value: "8080"
+            - name: MANAGEMENT_PORT
+              value: "9090"
+            # Pod identity injected at runtime (useful for log correlation)
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            # JVM heap tuning via container-aware flags
+            - name: JAVA_OPTS
+              value: >-
+                -XX:+UseContainerSupport
+                -XX:MaxRAMPercentage=75.0
+                -XX:+ExitOnOutOfMemoryError
+                -Djava.security.egd=file:/dev/./urandom
+
+          # ── Resource Requests & Limits ────────────────────────────────────
+          resources:
+            requests:
+              # Minimum guaranteed resources (used for scheduling decisions)
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              # Maximum before throttling (cpu) or OOMKilled (memory)
+              cpu: "1000m"
+              memory: "1024Mi"
+
+          # ── Liveness Probe ────────────────────────────────────────────────
+          # If this fails repeatedly Kubernetes RESTARTS the container.
+          # Targets /liveness to avoid restarting a pod with a degraded DB pool.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+              scheme: HTTP
+            initialDelaySeconds: 45   # Wait for JVM startup
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          # ── Readiness Probe ───────────────────────────────────────────────
+          # If this fails the pod is REMOVED from the Service endpoints;
+          # no traffic is sent until the check passes again.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          # ── Startup Probe ─────────────────────────────────────────────────
+          # Protects slow-starting pods from being killed before they are ready.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            failureThreshold: 12      # 12 × 10s = 2 min max startup window
+            periodSeconds: 10
+
+          # ── Volume Mounts (tmp dir for read-only root FS) ─────────────────
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+      # ── Pod Disruption Budget: ensure at least 2 pods are always up ────────
+      # (applied separately below in PodDisruptionBudget.yaml)

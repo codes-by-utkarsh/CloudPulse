@@ -1,0 +1,12 @@
+##############################################################################
+#  CloudPulse – Kubernetes Namespace
+#  All BodhGanga workloads live in the 'bodhganga' namespace.
+##############################################################################
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bodhganga
+  labels:
+    app.kubernetes.io/managed-by: cloudpulse
+    environment: production
+    monitoring: "true"

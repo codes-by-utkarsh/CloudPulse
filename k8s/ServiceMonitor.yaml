@@ -1,0 +1,52 @@
+##############################################################################
+#  CloudPulse – Prometheus ServiceMonitor for BodhGanga
+#
+#  The kube-prometheus-stack Prometheus Operator reads this resource and
+#  automatically adds BodhGanga's /actuator/prometheus endpoint as a scrape
+#  target.  No manual prometheus.yml editing required.
+##############################################################################
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: bodhganga-monitor
+  namespace: bodhganga
+  labels:
+    # This label MUST match the Prometheus Operator's serviceMonitorSelector.
+    # When you install kube-prometheus-stack with --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+    # it will pick up all ServiceMonitors.  Alternatively match the release label:
+    release: cloudpulse-prometheus
+    app.kubernetes.io/name: bodhganga
+    app.kubernetes.io/part-of: cloudpulse
+spec:
+  # Selects the BodhGanga Service in the 'bodhganga' namespace
+  namespaceSelector:
+    matchNames:
+      - bodhganga
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bodhganga
+
+  endpoints:
+    - port: management        # Must match the Service port name
+      path: /actuator/prometheus
+      scheme: http
+      interval: 30s           # How often Prometheus scrapes this target
+      scrapeTimeout: 10s
+
+      # Relabelling: attach Kubernetes metadata to every scraped metric
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+        - sourceLabels: [__meta_kubernetes_service_name]
+          targetLabel: service
+
+      metricRelabelings:
+        # Drop high-cardinality metrics we don't need to store
+        - sourceLabels: [__name__]
+          regex: "jvm_gc_pause_seconds_bucket|jvm_buffer_.*"
+          action: drop

@@ -1,0 +1,50 @@
+##############################################################################
+#  CloudPulse – BodhGanga Kubernetes Service
+#  Exposes the app within the cluster; Prometheus uses the 'management' port
+##############################################################################
+apiVersion: v1
+kind: Service
+metadata:
+  name: bodhganga-svc
+  namespace: bodhganga
+  labels:
+    app.kubernetes.io/name: bodhganga
+    app.kubernetes.io/part-of: cloudpulse
+    app.kubernetes.io/component: backend
+  annotations:
+    # ServiceMonitor uses this label to discover the scrape target
+    prometheus.io/scrape: "true"
+    prometheus.io/port:   "9090"
+    prometheus.io/path:   "/actuator/prometheus"
+spec:
+  type: ClusterIP   # Internal only – expose via Ingress for external traffic
+  selector:
+    app.kubernetes.io/name: bodhganga
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+    - name: management
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+
+---
+##############################################################################
+#  PodDisruptionBudget – guarantee minimum availability during node drains
+##############################################################################
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bodhganga-pdb
+  namespace: bodhganga
+  labels:
+    app.kubernetes.io/name: bodhganga
+    app.kubernetes.io/part-of: cloudpulse
+spec:
+  # At least 2 pods must be running at all times (out of 3 replicas)
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bodhganga
