@@ -1,44 +1,49 @@
 ##############################################################################
-#  CloudPulse – BodhGanga Kubernetes Deployment
-#  Phase 3: 3 replicas, resource limits, liveness & readiness probes
+#  CloudPulse – BodhGanga Backend Deployment
+#
+#  Real app facts (derived from the actual codebase):
+#    - Spring Boot 3.4.5  |  Java 17
+#    - MongoDB as primary datastore
+#    - Spring Security + JWT authentication
+#    - AWS S3, Razorpay, Google Drive, Gemini AI integrations
+#    - App port: 9090 (single port for both app traffic AND management/actuator)
+#    - Micrometer + Prometheus registry: /actuator/prometheus on :9090
 ##############################################################################
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: bodhganga
+  name: bodhganga-backend
   namespace: bodhganga
   labels:
-    app.kubernetes.io/name: bodhganga
+    app.kubernetes.io/name: bodhganga-backend
     app.kubernetes.io/part-of: cloudpulse
     app.kubernetes.io/component: backend
     version: "1.0.0"
   annotations:
-    # Enables Prometheus discovery via annotation-based scraping (fallback)
     prometheus.io/scrape: "true"
     prometheus.io/port:   "9090"
     prometheus.io/path:   "/actuator/prometheus"
 spec:
-  # ── High Availability: 3 replicas across nodes ────────────────────────────
+  # ── High Availability: 3 replicas ─────────────────────────────────────────
   replicas: 3
 
   selector:
     matchLabels:
-      app.kubernetes.io/name: bodhganga
+      app.kubernetes.io/name: bodhganga-backend
 
-  # ── Rolling Update Strategy ───────────────────────────────────────────────
+  # ── Zero-downtime Rolling Update ──────────────────────────────────────────
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      # At most 1 pod unavailable during a rollout (zero-downtime)
       maxUnavailable: 1
-      # Surge 1 extra pod to avoid capacity drop during update
       maxSurge: 1
 
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: bodhganga
+        app.kubernetes.io/name: bodhganga-backend
         app.kubernetes.io/part-of: cloudpulse
+        app.kubernetes.io/component: backend
         version: "1.0.0"
       annotations:
         prometheus.io/scrape: "true"
@@ -46,32 +51,32 @@ spec:
         prometheus.io/path:   "/actuator/prometheus"
 
     spec:
-      # ── Topology Spread: distribute pods across nodes ──────────────────────
+      # ── Spread pods across nodes to avoid single-node failures ────────────
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
           whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels:
-              app.kubernetes.io/name: bodhganga
+              app.kubernetes.io/name: bodhganga-backend
 
-      # ── Security Context (pod level) ───────────────────────────────────────
+      # ── Pod-level Security Context ────────────────────────────────────────
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
 
-      # ── Graceful shutdown: allow 30 s for in-flight requests ───────────────
+      # ── Graceful shutdown: drain in-flight requests ───────────────────────
       terminationGracePeriodSeconds: 30
 
       containers:
-        - name: bodhganga
-          # Replace with your actual image registry path
-          image: bodhganga-app:1.0.0
+        - name: bodhganga-backend
+          # Build and tag: docker build -t bodhganga-backend:1.0.0 bodhganga/backend/
+          image: bodhganga-backend:1.0.0
           imagePullPolicy: IfNotPresent
 
-          # ── Container Security Context ─────────────────────────────────────
+          # ── Container Security ───────────────────────────────────────────
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -79,24 +84,98 @@ spec:
               drop: ["ALL"]
 
           ports:
-            - name: http
-              containerPort: 8080
-              protocol: TCP
-            - name: management
+            # Single port for both application traffic AND /actuator/prometheus
+            - name: app
               containerPort: 9090
               protocol: TCP
 
-          # ── Environment Variables ──────────────────────────────────────────
+          # ── Environment Variables ────────────────────────────────────────
+          # Sensitive values (JWT_SECRET, API keys) come from the Secret.
+          # Non-sensitive config comes from the ConfigMap.
           env:
             - name: SPRING_PROFILES_ACTIVE
-              value: "production"
+              value: "prod"
             - name: ENVIRONMENT
               value: "production"
-            - name: SERVER_PORT
-              value: "8080"
-            - name: MANAGEMENT_PORT
+            - name: PORT
               value: "9090"
-            # Pod identity injected at runtime (useful for log correlation)
+            # MongoDB URI from Secret
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: mongo-uri
+            # JWT
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: jwt-secret
+            - name: JWT_EXPIRATION
+              value: "86400000"
+            # AWS S3
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: aws-secret-access-key
+            - name: AWS_REGION
+              value: "ap-south-1"
+            - name: AWS_S3_BUCKET
+              value: "bodhganga-prod"
+            # Razorpay
+            - name: RAZORPAY_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: razorpay-key-id
+                  optional: true
+            - name: RAZORPAY_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: razorpay-key-secret
+                  optional: true
+            # Email
+            - name: SMTP_HOST
+              value: "smtp.gmail.com"
+            - name: SMTP_PORT
+              value: "587"
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: smtp-user
+                  optional: true
+            - name: SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: smtp-pass
+                  optional: true
+            # Gemini AI
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: gemini-api-key
+                  optional: true
+            - name: GEMINI_MODEL
+              value: "gemini-2.5-flash"
+            # CORS
+            - name: ALLOWED_ORIGINS
+              value: "http://bodhganga-frontend-svc"
+            # Google Drive
+            - name: GOOGLE_DRIVE_PIPELINE_ENABLED
+              value: "false"
+            - name: GOOGLE_DRIVE_CREDENTIALS_PATH
+              value: "/app/google-credentials.json"
+            # Pod identity (useful for log correlation in Grafana)
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -105,11 +184,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            # JVM heap tuning via container-aware flags
+            # JVM tuning
             - name: JAVA_OPTS
               value: >-
                 -XX:+UseContainerSupport
@@ -117,62 +192,205 @@ spec:
                 -XX:+ExitOnOutOfMemoryError
                 -Djava.security.egd=file:/dev/./urandom
 
-          # ── Resource Requests & Limits ────────────────────────────────────
+          # ── Resource Requests & Limits ───────────────────────────────────
           resources:
             requests:
-              # Minimum guaranteed resources (used for scheduling decisions)
               cpu: "250m"
               memory: "512Mi"
             limits:
-              # Maximum before throttling (cpu) or OOMKilled (memory)
               cpu: "1000m"
-              memory: "1024Mi"
+              memory: "1536Mi"   # Slightly higher for S3/Drive/Gemini calls
 
           # ── Liveness Probe ────────────────────────────────────────────────
-          # If this fails repeatedly Kubernetes RESTARTS the container.
-          # Targets /liveness to avoid restarting a pod with a degraded DB pool.
+          # Kubernetes RESTARTS the pod if this fails 3x.
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: management
-              scheme: HTTP
-            initialDelaySeconds: 45   # Wait for JVM startup
+              port: app
+            initialDelaySeconds: 60    # Java + Spring Security startup time
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 3
             successThreshold: 1
 
           # ── Readiness Probe ───────────────────────────────────────────────
-          # If this fails the pod is REMOVED from the Service endpoints;
-          # no traffic is sent until the check passes again.
+          # Kubernetes stops routing traffic if this fails.
+          # Pod is only Ready when MongoDB connection is also healthy.
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: management
-              scheme: HTTP
-            initialDelaySeconds: 30
+              port: app
+            initialDelaySeconds: 45
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
             successThreshold: 1
 
           # ── Startup Probe ─────────────────────────────────────────────────
-          # Protects slow-starting pods from being killed before they are ready.
+          # Gives the app up to 2 minutes to start without false-positive kills.
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: management
-            failureThreshold: 12      # 12 × 10s = 2 min max startup window
+              port: app
+            failureThreshold: 12
             periodSeconds: 10
 
-          # ── Volume Mounts (tmp dir for read-only root FS) ─────────────────
+          # ── Volume Mounts ────────────────────────────────────────────────
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # Google credentials (mounted from Secret as a file)
+            - name: google-credentials
+              mountPath: /app/google-credentials.json
+              subPath: google-credentials.json
+              readOnly: true
 
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: google-credentials
+          secret:
+            secretName: bodhganga-secrets
+            items:
+              - key: google-credentials-json
+                path: google-credentials.json
+            optional: true
 
-      # ── Pod Disruption Budget: ensure at least 2 pods are always up ────────
-      # (applied separately below in PodDisruptionBudget.yaml)
+---
+##############################################################################
+#  BodhGanga Frontend Deployment
+#  React (Vite) served by Nginx – single-page app
+##############################################################################
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bodhganga-frontend
+  namespace: bodhganga
+  labels:
+    app.kubernetes.io/name: bodhganga-frontend
+    app.kubernetes.io/part-of: cloudpulse
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 2   # Frontend is stateless; 2 replicas sufficient
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bodhganga-frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bodhganga-frontend
+        app.kubernetes.io/part-of: cloudpulse
+        app.kubernetes.io/component: frontend
+    spec:
+      securityContext:
+        runAsNonRoot: false   # Nginx requires root to bind port 80
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: bodhganga-frontend
+          image: bodhganga-frontend:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+##############################################################################
+#  MongoDB StatefulSet
+#  Persistent, stable pod identity required for MongoDB.
+#  In production, prefer MongoDB Atlas or a managed service.
+##############################################################################
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bodhganga-mongodb
+  namespace: bodhganga
+  labels:
+    app.kubernetes.io/name: bodhganga-mongodb
+    app.kubernetes.io/part-of: cloudpulse
+    app.kubernetes.io/component: database
+spec:
+  serviceName: "bodhganga-mongodb"
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bodhganga-mongodb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bodhganga-mongodb
+        app.kubernetes.io/part-of: cloudpulse
+        app.kubernetes.io/component: database
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:7.0
+          ports:
+            - containerPort: 27017
+              name: mongodb
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: mongo-root-user
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bodhganga-secrets
+                  key: mongo-root-pass
+            - name: MONGO_INITDB_DATABASE
+              value: bodhganga
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          livenessProbe:
+            exec:
+              command: ["mongosh", "--eval", "db.adminCommand('ping')"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--eval", "db.adminCommand('ping')"]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          volumeMounts:
+            - name: mongo-data
+              mountPath: /data/db
+  volumeClaimTemplates:
+    - metadata:
+        name: mongo-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

@@ -1,6 +1,6 @@
 ##############################################################################
-#  CloudPulse – Kubernetes Namespace
-#  All BodhGanga workloads live in the 'bodhganga' namespace.
+#  CloudPulse – Kubernetes Namespaces
+#  bodhganga : application workloads (backend + frontend + mongodb)
 ##############################################################################
 apiVersion: v1
 kind: Namespace

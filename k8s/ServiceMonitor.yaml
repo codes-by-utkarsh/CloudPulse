@@ -1,40 +1,38 @@
 ##############################################################################
-#  CloudPulse – Prometheus ServiceMonitor for BodhGanga
+#  CloudPulse – Prometheus ServiceMonitor for BodhGanga Backend
 #
-#  The kube-prometheus-stack Prometheus Operator reads this resource and
-#  automatically adds BodhGanga's /actuator/prometheus endpoint as a scrape
-#  target.  No manual prometheus.yml editing required.
+#  Tells the Prometheus Operator to scrape /actuator/prometheus
+#  from bodhganga-backend-svc on port 9090 every 30 seconds.
+#
+#  IMPORTANT: BodhGanga uses a single port (9090) for both app traffic
+#  and the Prometheus metrics endpoint — the ServiceMonitor targets
+#  the 'app' port which maps to :9090/actuator/prometheus.
 ##############################################################################
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: bodhganga-monitor
+  name: bodhganga-backend-monitor
   namespace: bodhganga
   labels:
-    # This label MUST match the Prometheus Operator's serviceMonitorSelector.
-    # When you install kube-prometheus-stack with --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
-    # it will pick up all ServiceMonitors.  Alternatively match the release label:
     release: cloudpulse-prometheus
-    app.kubernetes.io/name: bodhganga
+    app.kubernetes.io/name: bodhganga-backend
     app.kubernetes.io/part-of: cloudpulse
 spec:
-  # Selects the BodhGanga Service in the 'bodhganga' namespace
   namespaceSelector:
     matchNames:
       - bodhganga
 
   selector:
     matchLabels:
-      app.kubernetes.io/name: bodhganga
+      app.kubernetes.io/name: bodhganga-backend
 
   endpoints:
-    - port: management        # Must match the Service port name
+    - port: app                         # Matches Service port name 'app' → :9090
       path: /actuator/prometheus
       scheme: http
-      interval: 30s           # How often Prometheus scrapes this target
+      interval: 30s
       scrapeTimeout: 10s
 
-      # Relabelling: attach Kubernetes metadata to every scraped metric
       relabelings:
         - sourceLabels: [__meta_kubernetes_pod_name]
           targetLabel: pod
@@ -46,7 +44,7 @@ spec:
           targetLabel: service
 
       metricRelabelings:
-        # Drop high-cardinality metrics we don't need to store
+        # Drop noisy high-cardinality buckets we don't need long-term
         - sourceLabels: [__name__]
           regex: "jvm_gc_pause_seconds_bucket|jvm_buffer_.*"
           action: drop
